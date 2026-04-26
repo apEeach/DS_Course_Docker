@@ -52,10 +52,10 @@ jobs:
 
       - name: Prepare compose files
         run: |
-          mkdir -p /tmp/deploy
-          cp nginx.conf /tmp/deploy/
+          mkdir -p deploy
+          cp nginx.conf deploy/
           export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:${{ github.sha }}"
-          envsubst '${APP_IMAGE}' < docker-compose.yml > /tmp/deploy/docker-compose.yml
+          envsubst '${APP_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
 
       - name: Upload compose files to server
         uses: appleboy/scp-action@v0.1.7
@@ -63,7 +63,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "/tmp/deploy/"
+          source: "deploy/"
           target: /opt/myapp
           strip_components: 0
 
