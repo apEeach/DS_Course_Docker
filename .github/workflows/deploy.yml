@@ -59,6 +59,16 @@ jobs:
           envsubst '${APP_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
 
+      - name: Upload .env to temp dir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: ".env"
+          target: /opt/myapp_tmp
+          strip_components: 0
+
       - name: Upload compose files to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -77,6 +87,12 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/myapp
+            # 首次部署才使用仓库的 .env，后续不覆盖服务器已有配置
+            if [ ! -f .env ] && [ -f /opt/myapp_tmp/.env ]; then
+              mv /opt/myapp_tmp/.env .env
+            else
+              rm -f /opt/myapp_tmp/.env
+            fi
             # 清理可能占用端口的旧 nginx 进程
             nginx -s stop 2>/dev/null || true
             systemctl stop nginx 2>/dev/null || true
