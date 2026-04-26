@@ -27,11 +27,8 @@ RUN apt-get update && apt-get install -y \
 # 2. 设置工作目录
 WORKDIR /app
 
-# 3. 构建阶段：clone 代码并编译（使用 BuildKit SSH mount 支持私有仓库）
-RUN --mount=type=ssh \
-    if [ -n "$GIT_REPO_URL" ]; then \
-      mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
-      ssh-keyscan -H github.com >> /root/.ssh/known_hosts 2>/dev/null && \
+# 3. 构建阶段：clone 代码并编译
+RUN if [ -n "$GIT_REPO_URL" ]; then \
       git clone --recursive "$GIT_REPO_URL" /app/code && \
       cd /app/code && make; \
     else \
