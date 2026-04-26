@@ -53,9 +53,11 @@ jobs:
       - name: Prepare compose files
         run: |
           mkdir -p deploy
-          cp nginx.conf deploy/
+          source .env
           export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:${{ github.sha }}"
+          export SERVER_NAME="${SERVER_NAME:-_}"
           envsubst '${APP_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
+          envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
 
       - name: Upload compose files to server
         uses: appleboy/scp-action@v0.1.7
@@ -63,9 +65,9 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "deploy/"
+          source: "deploy/docker-compose.yml,deploy/nginx.conf"
           target: /opt/myapp
-          strip_components: 0
+          strip_components: 1
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -75,6 +77,9 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/myapp
+            # 清理可能占用端口的旧 nginx 进程
+            nginx -s stop 2>/dev/null || true
+            systemctl stop nginx 2>/dev/null || true
             # 登录阿里云镜像仓库
             docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
             # 拉取最新镜像
