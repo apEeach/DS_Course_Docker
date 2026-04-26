@@ -34,11 +34,9 @@ services:
     networks:
       - my_net
 
-  # 3. 你的 C++ 开发环境
+  # 3. 你的 C++ 应用
   app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: ${APP_IMAGE}
     container_name: my_cpp_dev
     volumes:
       - ./code:/app/code  # clone 后的代码会出现在这里，修改即时生效

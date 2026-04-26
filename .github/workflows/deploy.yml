@@ -56,14 +56,12 @@ jobs:
           script: |
             cd /opt/myapp
 
-            # 1. 登录阿里云镜像仓库
+            # 登录阿里云镜像仓库
             docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
-
-            # 3. 拉取最新镜像（app 镜像 + nginx）
+            # 拉取最新镜像
             docker compose pull
-
-            # 4. 重建并启动容器（自动检测镜像变化）
-            docker compose up -d --build
-
-            # 5. 清理旧镜像
+            # 重启容器
+            docker compose down
+            docker compose up -d
+            # 清理旧镜像
             docker image prune -f
