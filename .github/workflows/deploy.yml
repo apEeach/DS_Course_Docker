@@ -2,11 +2,11 @@ name: Build and Deploy with Compose
 
 on:
   push:
-    branches: [ main ] # 监听 main 分支
+    branches: [ main ]
 
 jobs:
   build-and-push:
-    name: Build & Push Image
+    name: Build & Push App Image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -23,6 +23,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: docker/Dockerfile
           push: true
           tags: |
             ${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:latest
@@ -30,9 +31,22 @@ jobs:
 
   deploy-to-server:
     name: Deploy to Server
-    needs: build-and-push # 等上面的构建完成后才执行
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Upload compose files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml,nginx.conf"
+          target: /opt/myapp
+          strip_components: 0
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -40,17 +54,16 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. 进入服务器上的项目目录
             cd /opt/myapp
-            
-            # 2. 登录阿里云镜像仓库 (为了拉取私有镜像)
+
+            # 1. 登录阿里云镜像仓库
             docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
-            
-            # 3. 拉取最新镜像
+
+            # 3. 拉取最新镜像（app 镜像 + nginx）
             docker compose pull
-            
-            # 4. 重启服务 (docker compose up -d 会自动检测镜像变化并重建容器)
-            docker compose up -d
-            
-            # 5. 清理旧镜像 (可选，节省空间)
+
+            # 4. 重建并启动容器（自动检测镜像变化）
+            docker compose up -d --build
+
+            # 5. 清理旧镜像
             docker image prune -f
