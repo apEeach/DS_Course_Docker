@@ -37,14 +37,32 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Prepare compose files
+        run: |
+          mkdir -p /tmp/deploy /tmp/deploy_env
+          cp nginx.conf /tmp/deploy/
+          cp .env /tmp/deploy_env/
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:${{ github.sha }}"
+          envsubst '${APP_IMAGE}' < docker-compose.yml > /tmp/deploy/docker-compose.yml
+
       - name: Upload compose files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.yml,nginx.conf"
+          source: "/tmp/deploy/"
           target: /opt/myapp
+          strip_components: 0
+
+      - name: Upload .env to temp dir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "/tmp/deploy_env/.env"
+          target: /opt/myapp_tmp
           strip_components: 0
 
       - name: Deploy via SSH
@@ -55,6 +73,12 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/myapp
+            # 首次部署才使用仓库的 .env，后续不覆盖服务器已有配置
+            if [ ! -f .env ] && [ -f /opt/myapp_tmp/.env ]; then
+              mv /opt/myapp_tmp/.env .env
+            else
+              rm -f /opt/myapp_tmp/.env
+            fi
 
             # 登录阿里云镜像仓库
             docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
