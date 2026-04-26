@@ -3,22 +3,43 @@
 ## 目录结构
 
 ```
-├── .env                # 环境变量配置（复制 .env.example 修改）
-├── .env.example        # 环境变量模板
-├── docker-compose.yml  # 容器编排配置
+├── .env                # 环境变量配置（本地开发 & CI/CD 构建用）
 ├── docker/
-│   ├── Dockerfile      # 应用容器构建
-│   └── entrypoint.sh   # 容器启动入口脚本
-├── nginx.conf          # Nginx 配置
-└── code/               # 代码目录（git clone 自动生成）
+│   ├── Dockerfile      # 应用容器构建（构建时 clone 代码 + 编译）
+│   └── entrypoint.sh   # 容器启动入口脚本（初始化 + 启动服务）
+├── docker-compose.yml  # 容器编排配置
+├── nginx.conf          # Nginx 配置（server_name 通过环境变量注入）
+└── .github/workflows/
+    └── deploy.yml      # CI/CD 自动化构建 & 部署
 ```
+
+## 部署架构
+
+```
+本地代码 ──push──> GitHub ──trigger──> CI/CD
+                                        │
+                              ┌─────────┴──────────┐
+                              │  build-and-push     │
+                              │  git clone + make   │
+                              │  推送到阿里云 ACR    │
+                              └─────────┬──────────┘
+                                        │
+                              ┌─────────┴──────────┐
+                              │  deploy-to-server   │
+                              │  SSH 上传 compose   │
+                              │  pull + up -d       │
+                              └────────────────────┘
+```
+
+代码编译在 CI 阶段完成，服务器上只拉取镜像、启动容器，不再重复编译。
 
 ## 环境要求
 
-- Docker Engine + Docker Compose v2
-- 已配置的 GitHub SSH 密钥（仓库为私有仓库时）
+- 本地：Docker Engine + Docker Compose v2（本地开发构建时）
+- 服务器：Docker Engine + Docker Compose v2
+- CI/CD：GitHub Actions（自动触发）
 
-## 快速开始
+## 本地开发构建
 
 ### 1. 配置环境变量
 
@@ -26,75 +47,78 @@
 cp .env.example .env
 ```
 
-编辑 `.env`，填入你的配置：
+编辑 `.env`：
 
 ```env
 # Git 仓库配置
 GIT_REPO_URL=git@github.com:apEeach/DS_Course.git
 GIT_SSH_KEY_PATH=/home/user/.ssh/id_ed25519
 
-# 控制开关
-ENABLE_MYSQL=true
-ENABLE_INIT_DB=true
+# Nginx 域名
+SERVER_NAME=192.168.2.19
 
 # 数据库配置
 DB_HOST=db
 DB_USER=root
 DB_PASS=your_password
 DB_NAME=mydb
+
+# 控制开关
+ENABLE_MYSQL=true
+ENABLE_INIT_DB=true
 ```
 
 | 变量 | 说明 |
 |---|---|
-| `GIT_REPO_URL` | 代码仓库地址（SSH 格式） |
-| `GIT_SSH_KEY_PATH` | SSH 私钥在**宿主机**上的绝对路径 |
+| `GIT_REPO_URL` | 代码仓库地址 |
+| `GIT_SSH_KEY_PATH` | SSH 私钥在**宿主机**上的绝对路径（私有仓库需要） |
+| `SERVER_NAME` | Nginx server_name（域名或 IP） |
 | `ENABLE_MYSQL` | `true` 启动内置 MySQL，`false` 使用外部数据库 |
-| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化数据库，`false` 跳过 |
+| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化，`false` 跳过 |
 | `DB_HOST` | 数据库地址，使用内置 MySQL 时填 `db` |
 | `DB_USER` / `DB_PASS` / `DB_NAME` | 数据库账号、密码、库名 |
 
 ### 2. 构建并启动
 
-#### 场景 A：完整启动（内置 MySQL + 数据库初始化 + App + Nginx）
-
 ```bash
+# 完整启动（内置 MySQL + App + Nginx）
 docker compose --profile mysql up -d --build
-```
 
-#### 场景 B：不使用内置 MySQL（外部数据库 + App + Nginx）
-
-```bash
+# 不使用内置 MySQL（外部数据库）
 docker compose up -d --build
 ```
 
-> 不加 `--profile mysql` 就不会启动 MySQL 容器。
+> 构建时 Docker 会从 Git 仓库 clone 代码并编译，需要 SSH 认证（私有仓库需配置 `GIT_SSH_KEY_PATH` 挂载密钥）。
 
-#### 场景 C：不执行数据库初始化脚本
+## CI/CD 自动化部署
 
-在 `.env` 中设置 `ENABLE_INIT_DB=false`，然后正常启动即可。
+推送到 `main` 分支时自动触发。
 
-### 3. 启动流程
+### GitHub Secrets 配置
 
-```
-db (可选) → app (clone代码 → make → init_db.sh → server) → nginx (健康检查通过后启动)
-```
+| Secret | 说明 |
+|---|---|
+| `ALIYUN_REGISTRY` | 阿里云镜像仓库地址 |
+| `ALIYUN_USERNAME` | 阿里云 ACR 用户名 |
+| `ALIYUN_PASSWORD` | 阿里云 ACR 密码（或固定密码） |
+| `GIT_SSH_PRIVATE_KEY` | 有远程仓库 clone 权限的 SSH 私钥内容 |
+| `SSH_HOST` | 部署目标服务器 IP |
+| `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（用于登录部署） |
 
-app 容器的健康检查：当 `/app/code/.git` 存在时视为 healthy，nginx 才会启动。
+### CI 流程
 
-### 4. 验证服务
+1. **Build & Push**：从 `.env` 读取 `GIT_REPO_URL`，SSH agent 授权 clone 代码 → `make` 编译 → 推送到阿里云 ACR
+2. **Deploy**：生成 `docker-compose.yml`（注入镜像名）和 `nginx.conf`（注入 `SERVER_NAME`）→ SCP 到服务器 → SSH 执行 `docker compose pull && up -d`
+3. **`.env` 管理**：首次部署自动将仓库的 `.env` 部署到服务器，后续不覆盖服务器上已有的配置
+
+### 服务器端
+
+`.env` 首次部署自动生成，之后可在服务器上手动修改（如更改 `SERVER_NAME`、数据库地址等）。服务器只需执行：
 
 ```bash
-# 查看所有运行中的容器
-docker compose ps
-
-# 查看 app 日志
-docker compose logs -f app
-
-# 查看 Nginx 日志
-docker compose logs -f nginx
-
-# 进入 app 容器调试
-docker exec -it my_cpp_dev bash
+cd /opt/myapp
+docker compose pull
+docker compose up -d
 ```
 
 ## 常用操作
@@ -104,10 +128,17 @@ docker exec -it my_cpp_dev bash
 | 查看日志 | `docker compose logs -f app` |
 | 进入容器 | `docker exec -it my_cpp_dev bash` |
 | 重启所有 | `docker compose restart` |
-| 重建镜像 | `docker compose up -d --build` |
 | 停止并删除容器 | `docker compose down` |
 | 停止并删除全部（含 mysql） | `docker compose --profile mysql down` |
-| 清理 mysql 数据 | `docker compose --profile mysql down && rm -rf mysql_data/` |
+| 清理 mysql 数据 | `docker compose --profile mysql down -v && rm -rf mysql_data/` |
+
+## 容器启动流程
+
+```
+app (entrypoint: init_db.sh → server) → nginx (等待 app 就绪后启动)
+```
+
+web 静态文件通过 Docker 命名卷 `web_data` 从 app 容器共享到 nginx，无需手动同步。
 
 ## 常见问题
 
@@ -117,22 +148,15 @@ docker exec -it my_cpp_dev bash
 
 ### Nginx 返回 403/404
 
-`./code/webSource` 目录下没有静态文件，确认仓库代码已正确 clone。
+web 静态文件通过 Docker 卷 `web_data` 从 app 容器 `/app/code/webSource` 共享。检查 app 容器是否正常启动。
 
-### 子模块 clone 失败
+### 端口冲突
+
+80 或 8080 端口被占用时，检查是否有系统 nginx 或其他服务在运行：
 
 ```bash
-docker exec -it my_cpp_dev bash
-cd /app/code
-git submodule deinit -f deps/Crow
-rm -rf deps/Crow
-git submodule update --init deps/Crow
+# 查看端口占用
+ss -tlnp | grep -E '80|8080'
+# 停止系统 nginx
+systemctl stop nginx
 ```
-
-### 不想用内置 MySQL
-
-1. `.env` 中设置 `DB_HOST=<你的数据库地址>`
-2. 启动时不加 `--profile mysql`：
-   ```bash
-   docker compose up -d --build
-   ```
