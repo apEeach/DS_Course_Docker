@@ -29,38 +29,27 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf # 挂载配置文件
       - ./code/webSource:/usr/share/nginx/web
     depends_on:
-      app:
-        condition: service_healthy # 等 app clone 并编译完成后再启动
+      - app
     networks:
       - my_net
 
-  # 3. 你的 C++ 应用
+  # 3. 你的 C++ 应用（代码已在镜像构建时编译好）
   app:
     image: ${APP_IMAGE}
     container_name: my_cpp_dev
-    volumes:
-      - ./code:/app/code  # clone 后的代码会出现在这里，修改即时生效
-      - ${GIT_SSH_KEY_PATH}:/root/.ssh/id_ed25519  # SSH 私钥，用于 git clone（GIT_SSH_KEY_PATH 为空时不挂载）
     ports:
-      - "8080:8080"     # 你的 C++ 程序端口
+      - "8080:8080"
     environment:
-      - GIT_REPO_URL=${GIT_REPO_URL}
       - ENABLE_INIT_DB=${ENABLE_INIT_DB:-true}
-      - DB_HOST=${DB_HOST}        # 环境变量：告诉代码数据库在哪里,正式环境这里使用内网地址
-      - DB_USER=${DB_USER}        # 账号: 正式环境数据库账号
-      - DB_PASS=${DB_PASS}        # 账密码: 正式环境数据库密码
-      - DB_NAME=${DB_NAME}        # 数据库: 正式环境数据库
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - DB_NAME=${DB_NAME}
     depends_on:
-      - db                # 使用外部数据库时去掉此依赖
+      - db
     networks:
       - my_net
-    healthcheck:
-      test: ["CMD-SHELL", "test -d /app/code/.git"] # clone 完成即视为健康
-      interval: 2s
-      timeout: 2s
-      retries: 60
-      start_period: 120s
-    privileged: true # 给予一定权限，方便调试
+    privileged: true
 
 networks:
   my_net:
