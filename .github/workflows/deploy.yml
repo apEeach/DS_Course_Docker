@@ -42,6 +42,14 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:latest
             ${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:${{ github.sha }}
 
+      - name: Push Flyway Image to ACR
+        run: |
+          FLYWAY_SRC="flyway/flyway:10"
+          FLYWAY_DST="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/flyway:10"
+          docker pull "$FLYWAY_SRC"
+          docker tag "$FLYWAY_SRC" "$FLYWAY_DST"
+          docker push "$FLYWAY_DST"
+
   deploy-to-server:
     name: Deploy to Server
     needs: build-and-push
@@ -103,14 +111,13 @@ jobs:
 
               echo "Running Flyway migration against ${DB_HOST}:${DB_PORT:-3306}/${DB_NAME} ..."
 
-              # 拉取 Flyway 镜像（本地可能不存在）
-              docker pull flyway/flyway:latest
+              FLYWAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/flyway:10"
+              docker pull "$FLYWAY_IMAGE"
 
-              # 运行 Flyway Docker 执行迁移（一次性容器，完成后自动退出）
               docker run --rm \
                 --network host \
                 -v "$(pwd)/migrations:/flyway/sql" \
-                flyway/flyway:latest \
+                "$FLYWAY_IMAGE" \
                 -url="jdbc:mysql://${DB_HOST}:${DB_PORT:-3306}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai" \
                 -user="${DB_USER}" \
                 -password="${DB_PASS}" \
