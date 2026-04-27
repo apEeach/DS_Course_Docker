@@ -58,6 +58,7 @@ jobs:
           export SERVER_NAME="${SERVER_NAME:-_}"
           envsubst '${APP_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
+          cp -r migrations deploy/migrations
 
       - name: Upload .env to temp dir
         uses: appleboy/scp-action@v0.1.7
@@ -75,7 +76,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "deploy/docker-compose.yml,deploy/nginx.conf,migrations"
+          source: "deploy/docker-compose.yml,deploy/nginx.conf,deploy/migrations"
           target: /opt/myapp
           strip_components: 1
 
