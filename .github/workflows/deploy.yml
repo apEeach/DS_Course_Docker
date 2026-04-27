@@ -69,15 +69,55 @@ jobs:
           target: /opt/myapp_tmp
           strip_components: 0
 
-      - name: Upload compose files to server
+      - name: Upload compose + migrations files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "deploy/docker-compose.yml,deploy/nginx.conf"
+          source: "deploy/docker-compose.yml,deploy/nginx.conf,migrations"
           target: /opt/myapp
           strip_components: 1
+
+      - name: Flyway Migrate via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/myapp
+
+            # 如果迁移目录不存在则跳过（本地开发模式走 Docker MySQL）
+            if [ ! -d "migrations" ]; then
+              echo "No migrations directory, skipping Flyway."
+            else
+              # 登录阿里云镜像仓库
+              docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
+
+              # 从 .env 读取数据库连接信息
+              set -a
+              source .env
+              set +a
+
+              echo "Running Flyway migration against ${DB_HOST}:${DB_PORT:-3306}/${DB_NAME} ..."
+
+              # 拉取 Flyway 镜像（本地可能不存在）
+              docker pull flyway/flyway:latest
+
+              # 运行 Flyway Docker 执行迁移（一次性容器，完成后自动退出）
+              docker run --rm \
+                --network host \
+                -v "$(pwd)/migrations:/flyway/sql" \
+                flyway/flyway:latest \
+                -url="jdbc:mysql://${DB_HOST}:${DB_PORT:-3306}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai" \
+                -user="${DB_USER}" \
+                -password="${DB_PASS}" \
+                -locations="filesystem:/flyway/sql" \
+                migrate
+
+              echo "Flyway migration completed."
+            fi
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
