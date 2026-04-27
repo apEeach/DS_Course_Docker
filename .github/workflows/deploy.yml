@@ -122,9 +122,9 @@ jobs:
                 -user="${DB_USER}" \
                 -password="${DB_PASS}" \
                 -locations="filesystem:/flyway/sql" \
-                migrate
+                migrate 2>&1 | tee /opt/myapp/flyway.log
 
-              echo "Flyway migration completed."
+              echo "Flyway migration completed. Log saved to /opt/myapp/flyway.log"
             fi
 
       - name: Deploy via SSH
