@@ -1,4 +1,14 @@
-# Docker 部署指南
+# 课程培训平台
+
+面向职业技能培训的 B2C 课程平台，支持微信小程序端用户购课、签到，以及后台管理系统进行课程运营和学员管理。
+
+## 技术栈
+
+- **后端**：C++（GCC）、MySQL 8.0
+- **数据库迁移**：Flyway
+- **容器化**：Docker + Docker Compose
+- **CI/CD**：GitHub Actions + 阿里云 ACR
+- **反向代理**：Nginx
 
 ## 目录结构
 
@@ -9,6 +19,11 @@
 │   └── entrypoint.sh   # 容器启动入口脚本（初始化 + 启动服务）
 ├── docker-compose.yml  # 容器编排配置
 ├── nginx.conf          # Nginx 配置（server_name 通过环境变量注入）
+├── migrations/
+│   └── V1__initial_schema.sql   # Flyway 数据库迁移脚本
+├── docs/
+│   ├── PRD.md          # 产品需求文档
+│   └── db.md           # 数据库设计文档
 └── .github/workflows/
     └── deploy.yml      # CI/CD 自动化构建 & 部署
 ```
@@ -21,12 +36,13 @@
                               ┌─────────┴──────────┐
                               │  build-and-push     │
                               │  git clone + make   │
-                              │  推送到阿里云 ACR    │
+                              │  Flyway 镜像推送     │
                               └─────────┬──────────┘
                                         │
                               ┌─────────┴──────────┐
                               │  deploy-to-server   │
                               │  SSH 上传 compose   │
+                              │  Flyway 数据库迁移   │
                               │  pull + up -d       │
                               └────────────────────┘
 ```
@@ -65,7 +81,7 @@ DB_NAME=mydb
 
 # 控制开关
 ENABLE_MYSQL=true
-ENABLE_INIT_DB=true
+ENABLE_INIT_DB=false
 ```
 
 | 变量 | 说明 |
@@ -74,7 +90,7 @@ ENABLE_INIT_DB=true
 | `GIT_SSH_KEY_PATH` | SSH 私钥在**宿主机**上的绝对路径（私有仓库需要） |
 | `SERVER_NAME` | Nginx server_name（域名或 IP） |
 | `ENABLE_MYSQL` | `true` 启动内置 MySQL，`false` 使用外部数据库 |
-| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化，`false` 跳过 |
+| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化，`false` 跳过（使用 Flyway 管理数据库时设为 `false`） |
 | `DB_HOST` | 数据库地址，使用内置 MySQL 时填 `db` |
 | `DB_USER` / `DB_PASS` / `DB_NAME` | 数据库账号、密码、库名 |
 
@@ -90,6 +106,25 @@ docker compose up -d --build
 
 > 构建时 Docker 会从 Git 仓库 clone 代码并编译，需要 SSH 认证（私有仓库需配置 `GIT_SSH_KEY_PATH` 挂载密钥）。
 
+## 数据库管理
+
+项目使用 **Flyway** 管理数据库版本，迁移脚本位于 `migrations/` 目录。
+
+```bash
+# 手动执行 Flyway 迁移（外部数据库）
+docker run --rm \
+  --network host \
+  -v "$(pwd)/migrations:/flyway/sql" \
+  flyway/flyway:10 \
+  -url="jdbc:mysql://${DB_HOST}:3306/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai" \
+  -user="${DB_USER}" \
+  -password="${DB_PASS}" \
+  -locations="filesystem:/flyway/sql" \
+  migrate
+```
+
+> CI/CD 部署时会自动执行 Flyway 迁移，无需手动操作。
+
 ## CI/CD 自动化部署
 
 推送到 `main` 分支时自动触发。
@@ -100,15 +135,15 @@ docker compose up -d --build
 |---|---|
 | `ALIYUN_REGISTRY` | 阿里云镜像仓库地址 |
 | `ALIYUN_USERNAME` | 阿里云 ACR 用户名 |
-| `ALIYUN_PASSWORD` | 阿里云 ACR 密码（或固定密码） |
+| `ALIYUN_PASSWORD` | 阿里云 ACR 密码 |
 | `GIT_SSH_PRIVATE_KEY` | 有远程仓库 clone 权限的 SSH 私钥内容 |
 | `SSH_HOST` | 部署目标服务器 IP |
 | `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（用于登录部署） |
 
 ### CI 流程
 
-1. **Build & Push**：从 `.env` 读取 `GIT_REPO_URL`，SSH agent 授权 clone 代码 → `make` 编译 → 推送到阿里云 ACR
-2. **Deploy**：生成 `docker-compose.yml`（注入镜像名）和 `nginx.conf`（注入 `SERVER_NAME`）→ SCP 到服务器 → SSH 执行 `docker compose pull && up -d`
+1. **Build & Push**：从 `.env` 读取 `GIT_REPO_URL`，SSH agent 授权 clone 代码 → `make` 编译 → 推送到阿里云 ACR，同时推送 Flyway 镜像
+2. **Deploy**：生成 `docker-compose.yml`（注入镜像名）和 `nginx.conf`（注入 `SERVER_NAME`）→ SCP 到服务器 → SSH 执行 Flyway 数据库迁移 → SSH 执行 `docker compose pull && up -d`
 3. **`.env` 管理**：首次部署自动将仓库的 `.env` 部署到服务器，后续不覆盖服务器上已有的配置
 
 ### 服务器端
@@ -135,7 +170,7 @@ docker compose up -d
 ## 容器启动流程
 
 ```
-app (entrypoint: init_db.sh → server) → nginx (等待 app 就绪后启动)
+app (entrypoint: entrypoint.sh → server) → nginx (等待 app 就绪后启动)
 ```
 
 web 静态文件通过 Docker 命名卷 `web_data` 从 app 容器共享到 nginx，无需手动同步。
