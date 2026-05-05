@@ -21,7 +21,7 @@ git submodule update --init --recursive
 
 4、准备完成直接进行docker构建，见Docker指令的1
 
-**注意：2，3两步也可以在4之后执行**
+**注意：2，3两步需要在4之前执行，否则会挂载不到目录**
 
 
 
