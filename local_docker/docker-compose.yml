@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # 1. 数据库服务
+  db:
+    image: swr.cn-north-4.myhuaweicloud.com/library/mysql:8.0
+    container_name: my_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root           # 数据库密码
+      MYSQL_DATABASE: mydb                # 自动创建一个库
+      # MYSQL_USER: user_ds                 # admin用户
+      # MYSQL_PASSWORD: ds@888              # 用户密码
+    ports:
+      - "3306:3306" # 映射端口，方便你用 Navicat 连接
+    volumes:
+      - ./mysql_data:/var/lib/mysql # 数据持久化
+    networks:
+      - my_net
+
+  # 2. Nginx 服务
+  nginx:
+    image: swr.cn-north-4.myhuaweicloud.com/library/nginx:latest
+    container_name: my_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf # 挂载配置文件
+      - ./code/DS_Course/webSource:/usr/share/nginx/web
+    depends_on:
+      - app # 依赖你的应用启动
+    networks:
+      - my_net
+
+  # 3. 你的 C++ 开发环境
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: my_cpp_dev
+    volumes:
+      - ./code:/app/code  # 核心！代码挂载，修改即时生效
+    ports:
+      - "8080:8080"     # 你的 C++ 程序端口
+    environment:
+      - DB_HOST=db        # 环境变量：告诉代码数据库在哪里,正式环境这里使用内网地址
+      - DB_USER=root      # 账号: 正式环境数据库账号
+      - DB_PASS=root      # 账密码: 正式环境数据库密码
+      - DB_NAME=mydb      # 数据库: 正式环境数据库
+    depends_on:
+      - db                # 正式环境这里不需要depend db
+    networks:
+      - my_net
+    # 保持容器运行，等待你进去操作
+    command: tail -f /dev/null
+    privileged: true # 给予一定权限，方便调试
+
+networks:
+  my_net:
+    driver: bridge
