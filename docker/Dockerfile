@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y \
     libmysqlclient-dev \
     libboost-all-dev \
     libasio-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. 设置工作目录
