@@ -25,7 +25,7 @@ services:
       - "80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf # 挂载配置文件
-      - ./code/DS_Course/webSource:/usr/share/nginx/web
+      - ./code/webSource:/usr/share/nginx/web
     depends_on:
       - app # 依赖你的应用启动
     networks:
@@ -39,6 +39,8 @@ services:
     container_name: my_cpp_dev
     volumes:
       - ./code:/app/code  # 核心！代码挂载，修改即时生效
+      - /etc/localtime:/etc/localtime:ro  # 同步宿主机时区
+      - /etc/timezone:/etc/timezone:ro    # 同步宿主机时区
     ports:
       - "8080:8080"     # 你的 C++ 程序端口
     environment:
@@ -46,6 +48,10 @@ services:
       - DB_USER=root      # 账号: 正式环境数据库账号
       - DB_PASS=root      # 账密码: 正式环境数据库密码
       - DB_NAME=mydb      # 数据库: 正式环境数据库
+      - OSS_ENDPOINT=oss
+      - OSS_ACCESS_KEY_ID=oss
+      - OSS_ACCESS_KEY_SECRET=oss
+      - OSS_BUCKET_NAME=oss
     depends_on:
       - db                # 正式环境这里不需要depend db
     networks:

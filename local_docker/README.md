@@ -144,3 +144,20 @@ sudo apt update
 sudo apt install docker-ce docker-ce-cli containerd.io docker-compose-plugin
 ```
 
+
+
+#### 7、OSS库
+
+（1）下载oss源码
+
+```
+git clone https://github.com/aliyun/aliyun-oss-cpp-sdk.git
+```
+
+（2）根据源码生成静态.a库，以及安装头文件到
+
+```
+deps/lib
+deps/include
+```
+
