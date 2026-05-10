@@ -42,13 +42,6 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:latest
             ${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:${{ github.sha }}
 
-      - name: Push Flyway Image to ACR
-        run: |
-          FLYWAY_SRC="flyway/flyway:10"
-          FLYWAY_DST="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/flyway:10"
-          docker pull "$FLYWAY_SRC"
-          docker tag "$FLYWAY_SRC" "$FLYWAY_DST"
-          docker push "$FLYWAY_DST"
 
   deploy-to-server:
     name: Deploy to Server
@@ -66,7 +59,6 @@ jobs:
           export SERVER_NAME="${SERVER_NAME:-_}"
           envsubst '${APP_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
-          cp -r migrations deploy/migrations
 
       - name: Upload .env to temp dir
         uses: appleboy/scp-action@v0.1.7
@@ -84,48 +76,30 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "deploy/docker-compose.yml,deploy/nginx.conf,deploy/migrations"
+          source: "deploy/docker-compose.yml,deploy/nginx.conf"
           target: /opt/myapp
           strip_components: 1
 
-      - name: Flyway Migrate via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd /opt/myapp
-
-            # 如果迁移目录不存在则跳过（本地开发模式走 Docker MySQL）
-            if [ ! -d "migrations" ]; then
-              echo "No migrations directory, skipping Flyway."
-            else
-              # 登录阿里云镜像仓库
-              docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
-
-              # 从 .env 读取数据库连接信息
-              set -a
-              source .env
-              set +a
-
-              echo "Running Flyway migration against ${DB_HOST}:${DB_PORT:-3306}/${DB_NAME} ..."
-
-              FLYWAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/flyway:10"
-              docker pull "$FLYWAY_IMAGE"
-
-              docker run --rm \
-                --network host \
-                -v "$(pwd)/migrations:/flyway/sql" \
-                "$FLYWAY_IMAGE" \
-                -url="jdbc:mysql://${DB_HOST}:${DB_PORT:-3306}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai" \
-                -user="${DB_USER}" \
-                -password="${DB_PASS}" \
-                -locations="filesystem:/flyway/sql" \
-                migrate 2>&1 | tee /opt/myapp/flyway.log
-
-              echo "Flyway migration completed. Log saved to /opt/myapp/flyway.log"
-            fi
+      # Flyway 数据库迁移暂时停用
+      # - name: Flyway Migrate via SSH
+      #   uses: appleboy/ssh-action@v1.0.3
+      #   with:
+      #     host: ${{ secrets.SSH_HOST }}
+      #     username: root
+      #     key: ${{ secrets.SSH_PRIVATE_KEY }}
+      #     script: |
+      #       cd /opt/myapp
+      #       if [ ! -d "migrations" ]; then
+      #         echo "No migrations directory, skipping Flyway."
+      #       else
+      #         docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
+      #         set -a; source .env; set +a
+      #         FLYWAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/flyway:10"
+      #         docker pull "$FLYWAY_IMAGE"
+      #         docker run --rm --network host -v "$(pwd)/migrations:/flyway/sql" "$FLYWAY_IMAGE" \
+      #           -url="jdbc:mysql://${DB_HOST}:${DB_PORT:-3306}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai" \
+      #           -user="${DB_USER}" -password="${DB_PASS}" -locations="filesystem:/flyway/sql" migrate 2>&1 | tee /opt/myapp/flyway.log
+      #       fi
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -146,10 +120,10 @@ jobs:
             systemctl stop nginx 2>/dev/null || true
             # 登录阿里云镜像仓库
             docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
-            # 拉取最新镜像
-            docker compose pull
+            # 清理旧镜像释放空间（必须在 pull 之前执行，避免磁盘满）
+            docker image prune -af
+            # 拉取最新镜像（跳过 profiles 服务）
+            docker compose pull app nginx
             # 重启容器
             docker compose down
-            docker compose up -d
-            # 清理旧镜像
-            docker image prune -f
+            docker compose up -d app nginx
