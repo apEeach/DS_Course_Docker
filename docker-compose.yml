@@ -35,6 +35,9 @@ services:
   app:
     image: ${APP_IMAGE}
     container_name: my_cpp_dev
+    volumes:
+      - /etc/localtime:/etc/localtime:ro  # 同步宿主机时区
+      - /etc/timezone:/etc/timezone:ro    # 同步宿主机时区
     ports:
       - "8080:8080"
     environment:
@@ -43,6 +46,10 @@ services:
       - DB_USER=${DB_USER}
       - DB_PASS=${DB_PASS}
       - DB_NAME=${DB_NAME}
+      - OSS_ENDPOINT=${OSS_ENDPOINT}
+      - OSS_ACCESS_KEY_ID=${OSS_ACCESS_KEY_ID}
+      - OSS_ACCESS_KEY_SECRET=${OSS_ACCESS_KEY_SECRET}
+      - OSS_BUCKET_NAME=${OSS_BUCKET_NAME}
     networks:
       - my_net
     privileged: true
