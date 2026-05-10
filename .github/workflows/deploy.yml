@@ -36,6 +36,7 @@ jobs:
           file: docker/Dockerfile
           push: true
           ssh: default
+          no-cache: true
           build-args: |
             GIT_REPO_URL=${{ env.REPO_URL }}
           tags: |
