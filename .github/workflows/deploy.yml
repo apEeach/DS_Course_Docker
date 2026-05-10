@@ -121,10 +121,11 @@ jobs:
             systemctl stop nginx 2>/dev/null || true
             # 登录阿里云镜像仓库
             docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
-            # 清理旧镜像释放空间（必须在 pull 之前执行，避免磁盘满）
-            docker image prune -af
+            # 停容器 + 删除命名卷
+            docker compose down --volumes
             # 拉取最新镜像（跳过 profiles 服务）
             docker compose pull app nginx
-            # 重启容器
-            docker compose down
+            # 启动容器
             docker compose up -d app nginx
+            # 清理旧镜像释放空间
+            docker image prune -af
