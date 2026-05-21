@@ -7,6 +7,8 @@ on:
 env:
   ACR_NAMESPACE: sxd_server
   DEPLOY_TARGET: 1  # 1=只部署第一套, 2=只部署第二套, both=都部署
+  SECONDARY_ACR_REGISTRY: ${{ secrets.ALIYUN_REGISTRY_2 }}
+  SECONDARY_SSH_HOST: ${{ secrets.SSH_HOST_2 }}
 
 jobs:
   build-and-push:
@@ -29,7 +31,7 @@ jobs:
           password: ${{ secrets.ALIYUN_PASSWORD }}
 
       - name: Login to Secondary ACR (if configured)
-        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
+        if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ALIYUN_REGISTRY_2 }}
@@ -57,7 +59,7 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}
 
       - name: Build and Push Pay Image (Secondary)
-        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
+        if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -86,7 +88,7 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}
 
       - name: Build and Push (Secondary)
-        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
+        if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -198,7 +200,7 @@ jobs:
         run: exit 1
 
       - name: Check Server 2 credentials
-        if: ${{ secrets.SSH_HOST_2 == '' }}
+        if: ${{ env.SECONDARY_SSH_HOST == '' }}
         run: exit 1
 
       - name: Checkout Code
