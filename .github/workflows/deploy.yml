@@ -18,6 +18,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set date-based image tag
+        run: echo "IMAGE_TAG=$(date +%Y%m%d)" >> $GITHUB_ENV
+
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -56,7 +59,7 @@ jobs:
             PAY_GIT_REPO_URL=${{ env.PAY_REPO_URL }}
           tags: |
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:latest
-            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}
+            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ env.IMAGE_TAG }}
 
       - name: Build and Push Pay Image (Secondary)
         if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
@@ -71,7 +74,7 @@ jobs:
             PAY_GIT_REPO_URL=${{ env.PAY_REPO_URL }}
           tags: |
             ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:latest
-            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ env.IMAGE_TAG }}
 
       - name: Build and Push
         uses: docker/build-push-action@v5
@@ -85,7 +88,7 @@ jobs:
             GIT_REPO_URL=${{ env.REPO_URL }}
           tags: |
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:latest
-            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}
+            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ env.IMAGE_TAG }}
 
       - name: Build and Push (Secondary)
         if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
@@ -100,7 +103,7 @@ jobs:
             GIT_REPO_URL=${{ env.REPO_URL }}
           tags: |
             ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:latest
-            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ env.IMAGE_TAG }}
 
 
   deploy-to-server-1:
@@ -112,6 +115,9 @@ jobs:
         if: ${{ env.DEPLOY_TARGET != '1' && env.DEPLOY_TARGET != 'both' }}
         run: exit 1
 
+      - name: Set date-based image tag
+        run: echo "IMAGE_TAG=$(date +%Y%m%d)" >> $GITHUB_ENV
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -119,8 +125,8 @@ jobs:
         run: |
           mkdir -p deploy
           source .env
-          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}"
-          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}"
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ env.IMAGE_TAG }}"
+          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ env.IMAGE_TAG }}"
           export SERVER_NAME="${SERVER_NAME:-_}"
           envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
@@ -203,6 +209,9 @@ jobs:
         if: ${{ env.SECONDARY_SSH_HOST == '' }}
         run: exit 1
 
+      - name: Set date-based image tag
+        run: echo "IMAGE_TAG=$(date +%Y%m%d)" >> $GITHUB_ENV
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -210,8 +219,8 @@ jobs:
         run: |
           mkdir -p deploy
           source .env
-          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}"
-          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}"
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ env.IMAGE_TAG }}"
+          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ env.IMAGE_TAG }}"
           export SERVER_NAME="${SERVER_NAME:-_}"
           envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf

@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-- **后端**：C++（GCC）、MySQL 8.0
+- **后端**：C++（GCC）、MySQL 8.0、Go（支付服务）
 - **数据库迁移**：Flyway
 - **容器化**：Docker + Docker Compose
 - **CI/CD**：GitHub Actions + 阿里云 ACR
@@ -15,8 +15,9 @@
 ```
 ├── .env                # 环境变量配置（本地开发 & CI/CD 构建用）
 ├── docker/
-│   ├── Dockerfile      # 应用容器构建（构建时 clone 代码 + 编译）
-│   └── entrypoint.sh   # 容器启动入口脚本（初始化 + 启动服务）
+│   ├── Dockerfile      # C++ 应用容器构建（构建时 clone 代码 + 编译）
+│   ├── Dockerfile.pay  # Go 支付服务容器构建（构建时 clone 代码 + 静态编译）
+│   └── entrypoint.sh   # C++ 容器启动入口脚本（初始化 + 启动服务）
 ├── docker-compose.yml  # 容器编排配置
 ├── nginx.conf          # Nginx 配置（server_name 通过环境变量注入）
 ├── migrations/
@@ -25,7 +26,7 @@
 │   ├── PRD.md          # 产品需求文档
 │   └── db.md           # 数据库设计文档
 └── .github/workflows/
-    └── deploy.yml      # CI/CD 自动化构建 & 部署
+    └── deploy.yml      # CI/CD 自动化构建 & 部署（支持多环境）
 ```
 
 ## 部署架构
@@ -35,16 +36,18 @@
                                         │
                               ┌─────────┴──────────┐
                               │  build-and-push     │
-                              │  git clone + make   │
-                              │  Flyway 镜像推送     │
+                              │  git clone + make   │ (C++)
+                              │  git clone + go build│ (Go pay)
+                              │  可选推送到第二套ACR  │
                               └─────────┬──────────┘
                                         │
-                              ┌─────────┴──────────┐
-                              │  deploy-to-server   │
-                              │  SSH 上传 compose   │
-                              │  Flyway 数据库迁移   │
-                              │  pull + up -d       │
-                              └────────────────────┘
+                    ┌───────────────────┴───────────────────┐
+                    │                                       │
+          ┌─────────┴──────────┐                  ┌─────────┴──────────┐
+          │ deploy-to-server-1 │                  │ deploy-to-server-2 │
+          │ SSH 上传 compose    │                  │ SSH 上传 compose    │
+          │ pull + up -d       │                  │ pull + up -d       │
+          └────────────────────┘                  └────────────────────┘
 ```
 
 代码编译在 CI 阶段完成，服务器上只拉取镜像、启动容器，不再重复编译。
@@ -68,6 +71,7 @@ cp .env.example .env
 ```env
 # Git 仓库配置
 GIT_REPO_URL=git@github.com:apEeach/DS_Course.git
+PAY_GIT_REPO_URL=git@github.com:apEeach/DS_Course_Pay.git
 GIT_SSH_KEY_PATH=/home/user/.ssh/id_ed25519
 
 # Nginx 域名
@@ -82,76 +86,108 @@ DB_NAME=mydb
 # 控制开关
 ENABLE_MYSQL=true
 ENABLE_INIT_DB=false
+
+# 支付服务配置
+PAY_MODE=mock
+MOCK_ORDER_STATE=NOTPAY
 ```
 
 | 变量 | 说明 |
 |---|---|
-| `GIT_REPO_URL` | 代码仓库地址 |
+| `GIT_REPO_URL` | C++ 代码仓库地址 |
+| `PAY_GIT_REPO_URL` | Go 支付服务代码仓库地址 |
 | `GIT_SSH_KEY_PATH` | SSH 私钥在**宿主机**上的绝对路径（私有仓库需要） |
 | `SERVER_NAME` | Nginx server_name（域名或 IP） |
 | `ENABLE_MYSQL` | `true` 启动内置 MySQL，`false` 使用外部数据库 |
-| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化，`false` 跳过（使用 Flyway 管理数据库时设为 `false`） |
+| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化，`false` 跳过 |
 | `DB_HOST` | 数据库地址，使用内置 MySQL 时填 `db` |
 | `DB_USER` / `DB_PASS` / `DB_NAME` | 数据库账号、密码、库名 |
+| `PAY_MODE` | `mock`（模拟）或 `real`（真实微信支付） |
+| `MOCK_ORDER_STATE` | mock 查单返回状态（NOTPAY/SUCCESS/CLOSED/REVOKED） |
+| `OSS_ENDPOINT` | 阿里云 OSS Endpoint 地址 |
+| `OSS_ACCESS_KEY_ID` | 阿里云 OSS 访问密钥 ID |
+| `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS 访问密钥 Secret |
+| `OSS_BUCKET_NAME` | 阿里云 OSS Bucket 名称 |
+| `WECHAT_APPID` | 微信 AppID（`PAY_MODE=real` 时必填） |
+| `WECHAT_MCH_ID` | 微信商户号（`PAY_MODE=real` 时必填） |
+| `WECHAT_SERIAL_NO` | 商户证书序列号（`PAY_MODE=real` 时必填） |
+| `WECHAT_API_V3_KEY` | APIv3 密钥（`PAY_MODE=real` 时必填） |
+| `WECHAT_CERT_PATH` | 商户证书目录（容器内路径） |
+| `WECHAT_NOTIFY_URL` | 微信支付回调地址 |
+| `ENABLE_ORDER_CHECK` | 是否开启定时查单（`true`/`false`） |
+| `ORDER_PAYMENT_TIMEOUT_MINUTES` | 订单支付超时时间（分钟） |
+| `ORDER_CHECK_INTERVAL_SECONDS` | 查单间隔（秒） |
 
 ### 2. 构建并启动
 
 ```bash
-# 完整启动（内置 MySQL + App + Nginx）
+# 完整启动（内置 MySQL + C++ app + Go pay + Nginx）
 docker compose --profile mysql up -d --build
 
 # 不使用内置 MySQL（外部数据库）
 docker compose up -d --build
 ```
 
-> 构建时 Docker 会从 Git 仓库 clone 代码并编译，需要 SSH 认证（私有仓库需配置 `GIT_SSH_KEY_PATH` 挂载密钥）。
+> 构建时 Docker 会从 Git 仓库 clone 代码并编译，需要 SSH 认证（私有仓库需配置 SSH key）。
 
-## 数据库管理
+## 容器启动流程
 
-项目使用 **Flyway** 管理数据库版本，迁移脚本位于 `migrations/` 目录。
-
-```bash
-# 手动执行 Flyway 迁移（外部数据库）
-docker run --rm \
-  --network host \
-  -v "$(pwd)/migrations:/flyway/sql" \
-  flyway/flyway:10 \
-  -url="jdbc:mysql://${DB_HOST}:3306/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai" \
-  -user="${DB_USER}" \
-  -password="${DB_PASS}" \
-  -locations="filesystem:/flyway/sql" \
-  migrate
+```
+app (entrypoint: entrypoint.sh → server) ← 依赖 pay
+pay (Go 支付服务，静态编译，直接启动)
+nginx (等待 app 就绪后启动)
 ```
 
-> CI/CD 部署时会自动执行 Flyway 迁移，无需手动操作。
+web 静态文件通过 Docker 命名卷 `web_data` 从 app 容器共享到 nginx，无需手动同步。
 
 ## CI/CD 自动化部署
 
 推送到 `main` 分支时自动触发。
 
+### 多环境部署
+
+在 `deploy.yml` 顶部设置 `DEPLOY_TARGET` 控制部署目标：
+
+```yaml
+env:
+  ACR_NAMESPACE: sxd_server
+  DEPLOY_TARGET: 1  # 1=只部署第一套, 2=只部署第二套, both=都部署
+```
+
 ### GitHub Secrets 配置
 
 | Secret | 说明 |
 |---|---|
-| `ALIYUN_REGISTRY` | 阿里云镜像仓库地址 |
-| `ALIYUN_USERNAME` | 阿里云 ACR 用户名 |
-| `ALIYUN_PASSWORD` | 阿里云 ACR 密码 |
-| `GIT_SSH_PRIVATE_KEY` | 有远程仓库 clone 权限的 SSH 私钥内容 |
-| `SSH_HOST` | 部署目标服务器 IP |
-| `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（用于登录部署） |
+| `ALIYUN_REGISTRY` | 第一套阿里云 ACR 地址 |
+| `ALIYUN_USERNAME` | 第一套 ACR 用户名 |
+| `ALIYUN_PASSWORD` | 第一套 ACR 密码 |
+| `GIT_SSH_PRIVATE_KEY` | 有远程仓库 clone 权限的 SSH 私钥 |
+| `SSH_HOST` | 第一台部署服务器 IP |
+| `SSH_PRIVATE_KEY` | 第一台服务器 SSH 私钥 |
+| **可选第二套环境** | |
+| `ALIYUN_REGISTRY_2` | 第二套阿里云 ACR 地址（不配置则跳过） |
+| `ALIYUN_USERNAME_2` | 第二套 ACR 用户名 |
+| `ALIYUN_PASSWORD_2` | 第二套 ACR 密码 |
+| `SSH_HOST_2` | 第二台部署服务器 IP |
+| `SSH_PRIVATE_KEY_2` | 第二台服务器 SSH 私钥 |
 
 ### CI 流程
 
-1. **Build & Push**：从 `.env` 读取 `GIT_REPO_URL`，SSH agent 授权 clone 代码 → `make` 编译 → 推送到阿里云 ACR，同时推送 Flyway 镜像
-2. **Deploy**：生成 `docker-compose.yml`（注入镜像名）和 `nginx.conf`（注入 `SERVER_NAME`）→ SCP 到服务器 → SSH 执行 Flyway 数据库迁移 → SSH 执行 `docker compose pull && up -d`
-3. **`.env` 管理**：首次部署自动将仓库的 `.env` 部署到服务器，后续不覆盖服务器上已有的配置
+1. **Build & Push**：
+   - 从 `.env` 读取 `GIT_REPO_URL` 和 `PAY_GIT_REPO_URL`
+   - SSH agent 授权 clone C++ 代码 → `make` 编译 → 推送到 ACR
+   - 克隆 Go 支付代码 → `go build`（静态编译）→ 推送到 ACR
+   - 如果配置了第二套 ACR，同时推送到第二套
+2. **Deploy**：生成 `docker-compose.yml` 和 `nginx.conf` → SCP 到服务器 → SSH 执行 `docker compose pull && up -d`
+3. **`.env` 和 `nginx.conf` 管理**：首次部署自动上传到服务器，后续不覆盖
 
 ### 服务器端
 
-`.env` 首次部署自动生成，之后可在服务器上手动修改（如更改 `SERVER_NAME`、数据库地址等）。服务器只需执行：
+`.env` 和 `nginx.conf` 首次部署自动生成，之后可在服务器上手动修改（如更改 `SERVER_NAME`、数据库地址等）。修改后执行：
 
 ```bash
 cd /opt/myapp
+docker compose restart nginx  # 修改 nginx.conf 后重启
 docker compose pull
 docker compose up -d
 ```
@@ -160,26 +196,37 @@ docker compose up -d
 
 | 操作 | 命令 |
 |---|---|
-| 查看日志 | `docker compose logs -f app` |
-| 进入容器 | `docker exec -it my_cpp_dev bash` |
+| 查看日志 | `docker compose logs -f app` 或 `docker compose logs -f pay` |
+| 进入 C++ 容器 | `docker exec -it my_cpp_dev bash` |
+| 进入 Go 支付容器 | `docker exec -it my_go_pay bash` |
+| 健康检查（Go） | `curl http://localhost:9090/health` |
 | 重启所有 | `docker compose restart` |
 | 停止并删除容器 | `docker compose down` |
 | 停止并删除全部（含 mysql） | `docker compose --profile mysql down` |
 | 清理 mysql 数据 | `docker compose --profile mysql down -v && rm -rf mysql_data/` |
 
-## 容器启动流程
+## Nginx 路由
 
-```
-app (entrypoint: entrypoint.sh → server) → nginx (等待 app 就绪后启动)
-```
-
-web 静态文件通过 Docker 命名卷 `web_data` 从 app 容器共享到 nginx，无需手动同步。
+| 路径 | 目标 |
+|---|---|
+| `/` | 静态文件 |
+| `/api` | C++ 后端 (`app:8080`) |
+| `/pay/notify` | Go 支付服务微信回调 (`my_go_pay:9090`) |
+| `/pay/mockOrderQuery/` | Go 支付服务查单接口 |
 
 ## 常见问题
 
 ### SSH key 挂载失败
 
-确保 `.env` 中 `GIT_SSH_KEY_PATH` 是宿主机的**绝对路径**，且文件存在。
+确保 SSH key 绑定的 GitHub 账号对 `DS_Course` 和 `DS_Course_Pay` 两个仓库都有 clone 权限。
+
+### Go 支付服务启动失败
+
+检查 `/pay_service` 二进制是否存在：
+```bash
+docker logs my_go_pay
+```
+如果报 `no such file or directory`，通常是 CI 构建时没有加 `CGO_ENABLED=0` 静态编译。
 
 ### Nginx 返回 403/404
 
@@ -195,3 +242,7 @@ ss -tlnp | grep -E '80|8080'
 # 停止系统 nginx
 systemctl stop nginx
 ```
+
+### `nginx.conf` 或 `.env` 不生效
+
+这两个文件在**首次部署**时上传到服务器，后续 CI/CD 不会覆盖。如需更新，可在服务器上直接修改 `/opt/myapp/nginx.conf` 和 `/opt/myapp/.env`，然后重启对应容器。
