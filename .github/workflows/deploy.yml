@@ -29,7 +29,7 @@ jobs:
           password: ${{ secrets.ALIYUN_PASSWORD }}
 
       - name: Login to Secondary ACR (if configured)
-        if: secrets.ALIYUN_REGISTRY_2 != ''
+        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ALIYUN_REGISTRY_2 }}
@@ -57,7 +57,7 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}
 
       - name: Build and Push Pay Image (Secondary)
-        if: secrets.ALIYUN_REGISTRY_2 != ''
+        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -86,7 +86,7 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}
 
       - name: Build and Push (Secondary)
-        if: secrets.ALIYUN_REGISTRY_2 != ''
+        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -104,9 +104,12 @@ jobs:
   deploy-to-server-1:
     name: Deploy to Server 1
     needs: build-and-push
-    if: env.DEPLOY_TARGET == '1' || env.DEPLOY_TARGET == 'both'
     runs-on: ubuntu-latest
     steps:
+      - name: Check deploy target
+        if: ${{ env.DEPLOY_TARGET != '1' && env.DEPLOY_TARGET != 'both' }}
+        run: exit 1
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -188,9 +191,16 @@ jobs:
   deploy-to-server-2:
     name: Deploy to Server 2
     needs: build-and-push
-    if: (env.DEPLOY_TARGET == '2' || env.DEPLOY_TARGET == 'both') && secrets.SSH_HOST_2 != ''
     runs-on: ubuntu-latest
     steps:
+      - name: Check deploy target
+        if: ${{ env.DEPLOY_TARGET != '2' && env.DEPLOY_TARGET != 'both' }}
+        run: exit 1
+
+      - name: Check Server 2 credentials
+        if: ${{ secrets.SSH_HOST_2 == '' }}
+        run: exit 1
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
