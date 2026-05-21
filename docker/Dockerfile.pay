@@ -1,21 +1,30 @@
-# Go 运行环境镜像（代码在构建时 clone，启动时由 start.sh 编译并运行）
-FROM golang:1.23
+# 第一阶段：Go 编译
+FROM golang:1.23 AS builder
 
 ARG PAY_GIT_REPO_URL
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/pay
+WORKDIR /build
 
-# 构建时 clone 代码（SSH mount 支持私有仓库）
+# 构建时 clone 代码并编译（SSH mount 支持私有仓库）
 RUN --mount=type=ssh \
     if [ -n "$PAY_GIT_REPO_URL" ]; then \
       mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
       ssh-keyscan -H github.com >> /root/.ssh/known_hosts 2>/dev/null && \
-      git clone --recursive "$PAY_GIT_REPO_URL" . ; \
+      git clone --recursive "$PAY_GIT_REPO_URL" . && \
+      go build -o pay_service . ; \
     else \
       echo "[WARN] PAY_GIT_REPO_URL not set, skipping build"; \
     fi
 
-# 启动时执行 start.sh（负责 go build + 运行）
-CMD ["bash", "start.sh"]
+# 第二阶段：最小运行镜像
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata
+
+COPY --from=builder /build/pay_service /pay_service
+
+EXPOSE 9090
+
+CMD ["/pay_service"]
