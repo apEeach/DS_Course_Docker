@@ -8,12 +8,13 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 
 # 构建时 clone 代码并编译（SSH mount 支持私有仓库）
+# CGO_ENABLED=0 强制静态编译，确保能在 alpine 上运行
 RUN --mount=type=ssh \
     if [ -n "$PAY_GIT_REPO_URL" ]; then \
       mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
       ssh-keyscan -H github.com >> /root/.ssh/known_hosts 2>/dev/null && \
       git clone --recursive "$PAY_GIT_REPO_URL" . && \
-      go build -o pay_service . ; \
+      CGO_ENABLED=0 go build -o pay_service . ; \
     else \
       echo "[WARN] PAY_GIT_REPO_URL not set, skipping build"; \
     fi
