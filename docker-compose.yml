@@ -31,7 +31,29 @@ services:
     networks:
       - my_net
 
-  # 3. 你的 C++ 应用（代码已在镜像构建时编译好）
+  # 3. Go 支付服务
+  pay:
+    image: ${PAY_IMAGE}
+    container_name: my_go_pay
+    ports:
+      - "9090:9090"
+    environment:
+      - PAY_MODE=${PAY_MODE:-mock}
+      - CPP_HOST=http://my_cpp_dev:8080
+      - MOCK_ORDER_STATE=${MOCK_ORDER_STATE:-NOTPAY}
+      - WECHAT_APPID=${WECHAT_APPID}
+      - WECHAT_MCH_ID=${WECHAT_MCH_ID}
+      - WECHAT_SERIAL_NO=${WECHAT_SERIAL_NO}
+      - WECHAT_API_V3_KEY=${WECHAT_API_V3_KEY}
+      - WECHAT_CERT_PATH=${WECHAT_CERT_PATH:-/app/certs}
+      - WECHAT_NOTIFY_URL=${WECHAT_NOTIFY_URL}
+    networks:
+      - my_net
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
+  # 4. 你的 C++ 应用（代码已在镜像构建时编译好）
   app:
     image: ${APP_IMAGE}
     container_name: my_cpp_dev
@@ -47,6 +69,12 @@ services:
       - OSS_ACCESS_KEY_ID=${OSS_ACCESS_KEY_ID}
       - OSS_ACCESS_KEY_SECRET=${OSS_ACCESS_KEY_SECRET}
       - OSS_BUCKET_NAME=${OSS_BUCKET_NAME}
+      - PAY_HOST=http://my_go_pay:9090
+      - ENABLE_ORDER_CHECK=${ENABLE_ORDER_CHECK:-true}
+      - ORDER_PAYMENT_TIMEOUT_MINUTES=${ORDER_PAYMENT_TIMEOUT_MINUTES:-30}
+      - ORDER_CHECK_INTERVAL_SECONDS=${ORDER_CHECK_INTERVAL_SECONDS:-300}
+    depends_on:
+      - pay
     networks:
       - my_net
     privileged: true

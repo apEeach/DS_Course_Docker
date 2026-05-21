@@ -4,6 +4,10 @@ on:
   push:
     branches: [ main ]
 
+env:
+  ACR_NAMESPACE: sxd_server
+  DEPLOY_TARGET: 1  # 1=只部署第一套, 2=只部署第二套, both=都部署
+
 jobs:
   build-and-push:
     name: Build & Push App Image
@@ -17,17 +21,55 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
 
-      - name: Login to Aliyun ACR
+      - name: Login to Primary ACR
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ALIYUN_REGISTRY }}
           username: ${{ secrets.ALIYUN_USERNAME }}
           password: ${{ secrets.ALIYUN_PASSWORD }}
 
+      - name: Login to Secondary ACR (if configured)
+        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ALIYUN_REGISTRY_2 }}
+          username: ${{ secrets.ALIYUN_USERNAME_2 }}
+          password: ${{ secrets.ALIYUN_PASSWORD_2 }}
+
       - name: Load GIT_REPO_URL from .env
         run: |
           source .env
           echo "REPO_URL=${GIT_REPO_URL}" >> $GITHUB_ENV
+          echo "PAY_REPO_URL=${PAY_GIT_REPO_URL}" >> $GITHUB_ENV
+
+      - name: Build and Push Pay Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.pay
+          push: true
+          ssh: default
+          no-cache: true
+          build-args: |
+            PAY_GIT_REPO_URL=${{ env.PAY_REPO_URL }}
+          tags: |
+            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:latest
+            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}
+
+      - name: Build and Push Pay Image (Secondary)
+        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.pay
+          push: true
+          ssh: default
+          no-cache: true
+          build-args: |
+            PAY_GIT_REPO_URL=${{ env.PAY_REPO_URL }}
+          tags: |
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:latest
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}
 
       - name: Build and Push
         uses: docker/build-push-action@v5
@@ -40,13 +82,29 @@ jobs:
           build-args: |
             GIT_REPO_URL=${{ env.REPO_URL }}
           tags: |
-            ${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:latest
-            ${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:${{ github.sha }}
+            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:latest
+            ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}
+
+      - name: Build and Push (Secondary)
+        if: ${{ secrets.ALIYUN_REGISTRY_2 != '' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          ssh: default
+          no-cache: true
+          build-args: |
+            GIT_REPO_URL=${{ env.REPO_URL }}
+          tags: |
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:latest
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}
 
 
-  deploy-to-server:
-    name: Deploy to Server
+  deploy-to-server-1:
+    name: Deploy to Server 1
     needs: build-and-push
+    if: ${{ env.DEPLOY_TARGET == '1' || env.DEPLOY_TARGET == 'both' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -56,9 +114,10 @@ jobs:
         run: |
           mkdir -p deploy
           source .env
-          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/test_server:${{ github.sha }}"
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}"
+          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}"
           export SERVER_NAME="${SERVER_NAME:-_}"
-          envsubst '${APP_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
+          envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
 
       - name: Upload .env to temp dir
@@ -71,36 +130,25 @@ jobs:
           target: /opt/myapp_tmp
           strip_components: 0
 
-      - name: Upload compose + migrations files to server
+      - name: Upload nginx.conf to temp dir
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "deploy/docker-compose.yml,deploy/nginx.conf"
+          source: "deploy/nginx.conf"
+          target: /opt/myapp_tmp
+          strip_components: 0
+
+      - name: Upload compose to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "deploy/docker-compose.yml"
           target: /opt/myapp
           strip_components: 1
-
-      # Flyway 数据库迁移暂时停用
-      # - name: Flyway Migrate via SSH
-      #   uses: appleboy/ssh-action@v1.0.3
-      #   with:
-      #     host: ${{ secrets.SSH_HOST }}
-      #     username: root
-      #     key: ${{ secrets.SSH_PRIVATE_KEY }}
-      #     script: |
-      #       cd /opt/myapp
-      #       if [ ! -d "migrations" ]; then
-      #         echo "No migrations directory, skipping Flyway."
-      #       else
-      #         docker login --username=${{ secrets.ALIYUN_USERNAME }} --password=${{ secrets.ALIYUN_PASSWORD }} ${{ secrets.ALIYUN_REGISTRY }}
-      #         set -a; source .env; set +a
-      #         FLYWAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/sxd_server/flyway:10"
-      #         docker pull "$FLYWAY_IMAGE"
-      #         docker run --rm --network host -v "$(pwd)/migrations:/flyway/sql" "$FLYWAY_IMAGE" \
-      #           -url="jdbc:mysql://${DB_HOST}:${DB_PORT:-3306}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai" \
-      #           -user="${DB_USER}" -password="${DB_PASS}" -locations="filesystem:/flyway/sql" migrate 2>&1 | tee /opt/myapp/flyway.log
-      #       fi
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -116,6 +164,12 @@ jobs:
             else
               rm -f /opt/myapp_tmp/.env
             fi
+            # 首次部署才使用仓库的 nginx.conf，后续不覆盖服务器已有配置
+            if [ ! -f nginx.conf ] && [ -f /opt/myapp_tmp/nginx.conf ]; then
+              mv /opt/myapp_tmp/nginx.conf .
+            else
+              rm -f /opt/myapp_tmp/nginx.conf
+            fi
             # 清理可能占用端口的旧 nginx 进程
             nginx -s stop 2>/dev/null || true
             systemctl stop nginx 2>/dev/null || true
@@ -124,8 +178,92 @@ jobs:
             # 停容器 + 删除命名卷
             docker compose down --volumes
             # 拉取最新镜像（跳过 profiles 服务）
-            docker compose pull app nginx
+            docker compose pull app nginx pay
             # 启动容器
-            docker compose up -d app nginx
+            docker compose up -d app nginx pay
+            # 清理旧镜像释放空间
+            docker image prune -af
+
+
+  deploy-to-server-2:
+    name: Deploy to Server 2
+    needs: build-and-push
+    if: ${{ (env.DEPLOY_TARGET == '2' || env.DEPLOY_TARGET == 'both') && secrets.SSH_HOST_2 != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Prepare compose files
+        run: |
+          mkdir -p deploy
+          source .env
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ github.sha }}"
+          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ github.sha }}"
+          export SERVER_NAME="${SERVER_NAME:-_}"
+          envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
+          envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
+
+      - name: Upload .env to temp dir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          source: ".env"
+          target: /opt/myapp_tmp
+          strip_components: 0
+
+      - name: Upload nginx.conf to temp dir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          source: "deploy/nginx.conf"
+          target: /opt/myapp_tmp
+          strip_components: 0
+
+      - name: Upload compose to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          source: "deploy/docker-compose.yml"
+          target: /opt/myapp
+          strip_components: 1
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          script: |
+            cd /opt/myapp
+            # 首次部署才使用仓库的 .env，后续不覆盖服务器已有配置
+            if [ ! -f .env ] && [ -f /opt/myapp_tmp/.env ]; then
+              mv /opt/myapp_tmp/.env .env
+            else
+              rm -f /opt/myapp_tmp/.env
+            fi
+            # 首次部署才使用仓库的 nginx.conf，后续不覆盖服务器已有配置
+            if [ ! -f nginx.conf ] && [ -f /opt/myapp_tmp/nginx.conf ]; then
+              mv /opt/myapp_tmp/nginx.conf .
+            else
+              rm -f /opt/myapp_tmp/nginx.conf
+            fi
+            # 清理可能占用端口的旧 nginx 进程
+            nginx -s stop 2>/dev/null || true
+            systemctl stop nginx 2>/dev/null || true
+            # 登录阿里云镜像仓库
+            docker login --username=${{ secrets.ALIYUN_USERNAME_2 }} --password=${{ secrets.ALIYUN_PASSWORD_2 }} ${{ secrets.ALIYUN_REGISTRY_2 }}
+            # 停容器 + 删除命名卷
+            docker compose down --volumes
+            # 拉取最新镜像（跳过 profiles 服务）
+            docker compose pull app nginx pay
+            # 启动容器
+            docker compose up -d app nginx pay
             # 清理旧镜像释放空间
             docker image prune -af
