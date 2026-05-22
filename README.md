@@ -5,7 +5,7 @@
 ## 技术栈
 
 - **后端**：C++（GCC）、MySQL 8.0、Go（支付服务）
-- **数据库迁移**：Flyway
+- **数据库迁移**：Flyway / 手动 SQL 脚本
 - **容器化**：Docker + Docker Compose
 - **CI/CD**：GitHub Actions + 阿里云 ACR
 - **反向代理**：Nginx
@@ -13,20 +13,20 @@
 ## 目录结构
 
 ```
-├── .env                # 环境变量配置（本地开发 & CI/CD 构建用）
+├── .env                     # 环境变量配置（本地开发 & CI/CD 构建用）
 ├── docker/
-│   ├── Dockerfile      # C++ 应用容器构建（构建时 clone 代码 + 编译）
-│   ├── Dockerfile.pay  # Go 支付服务容器构建（构建时 clone 代码 + 静态编译）
-│   └── entrypoint.sh   # C++ 容器启动入口脚本（初始化 + 启动服务）
-├── docker-compose.yml  # 容器编排配置
-├── nginx.conf          # Nginx 配置（server_name 通过环境变量注入）
+│   ├── Dockerfile           # C++ 应用容器构建（Ubuntu 22.04，构建时 clone 代码 + make 编译）
+│   ├── Dockerfile.pay       # Go 支付服务容器构建（Go 1.23，构建时 clone 代码 + 静态编译）
+│   └── entrypoint.sh        # C++ 容器启动入口脚本（条件执行 init_db.sh + 启动 server）
+├── docker-compose.yml       # 容器编排配置（app + pay + nginx + 可选 mysql）
+├── nginx.conf               # Nginx 配置（server_name 通过环境变量注入）
 ├── migrations/
-│   └── V1__initial_schema.sql   # Flyway 数据库迁移脚本
+│   └── 1.sql                # 数据库初始化 SQL（用户 / 会话 / 第三方账号 / 验证码表）
 ├── docs/
-│   ├── PRD.md          # 产品需求文档
-│   └── db.md           # 数据库设计文档
+│   ├── PRD.md               # 产品需求文档
+│   └── db.md                # 数据库设计文档
 └── .github/workflows/
-    └── deploy.yml      # CI/CD 自动化构建 & 部署（支持多环境）
+    └── deploy.yml           # CI/CD 自动化构建 & 部署（支持多环境、多 ACR 推送）
 ```
 
 ## 部署架构
@@ -36,21 +36,23 @@
                                         │
                               ┌─────────┴──────────┐
                               │  build-and-push     │
-                              │  git clone + make   │ (C++)
-                              │  git clone + go build│ (Go pay)
-                              │  可选推送到第二套ACR  │
+                              │  Ubuntu 22.04 编译   │ (C++, make)
+                              │  Go 1.23 静态编译     │ (CGO_ENABLED=0)
+                              │  推送到阿里云 ACR     │
+                              │  (可选: 第二套 ACR)   │
                               └─────────┬──────────┘
                                         │
                     ┌───────────────────┴───────────────────┐
                     │                                       │
           ┌─────────┴──────────┐                  ┌─────────┴──────────┐
           │ deploy-to-server-1 │                  │ deploy-to-server-2 │
-          │ SSH 上传 compose    │                  │ SSH 上传 compose    │
-          │ pull + up -d       │                  │ pull + up -d       │
+          │ envsubst 生成配置   │                  │ envsubst 生成配置   │
+          │ SCP 上传 + SSH 部署  │                  │ SCP 上传 + SSH 部署  │
+          │ down → pull → up   │                  │ down → pull → up   │
           └────────────────────┘                  └────────────────────┘
 ```
 
-代码编译在 CI 阶段完成，服务器上只拉取镜像、启动容器，不再重复编译。
+代码编译在 CI 阶段完成（C++ 在 Ubuntu 22.04 镜像中编译，Go 在 golang:1.23 中静态编译），服务器上只拉取镜像、启动容器，不再重复编译。
 
 ## 环境要求
 
@@ -74,8 +76,11 @@ GIT_REPO_URL=git@github.com:apEeach/DS_Course.git
 PAY_GIT_REPO_URL=git@github.com:apEeach/DS_Course_Pay.git
 GIT_SSH_KEY_PATH=/home/user/.ssh/id_ed25519
 
-# Nginx 域名
-SERVER_NAME=192.168.2.19
+# 是否启动 mysql 容器（true / false）
+ENABLE_MYSQL=false
+
+# 是否执行数据库初始化脚本 init_db.sh（true / false）
+ENABLE_INIT_DB=false
 
 # 数据库配置
 DB_HOST=db
@@ -83,13 +88,31 @@ DB_USER=root
 DB_PASS=your_password
 DB_NAME=mydb
 
-# 控制开关
-ENABLE_MYSQL=true
-ENABLE_INIT_DB=false
+# OSS 配置
+OSS_ENDPOINT=test
+OSS_ACCESS_KEY_ID=test
+OSS_ACCESS_KEY_SECRET=test
+OSS_BUCKET_NAME=test
+
+# Nginx 域名
+SERVER_NAME=192.168.2.19
 
 # 支付服务配置
 PAY_MODE=mock
 MOCK_ORDER_STATE=NOTPAY
+
+# 微信商户配置（PAY_MODE=real 时必填）
+WECHAT_APPID=
+WECHAT_MCH_ID=
+WECHAT_SERIAL_NO=
+WECHAT_API_V3_KEY=
+WECHAT_CERT_PATH=/app/certs
+WECHAT_NOTIFY_URL=
+
+# 定时查单兜底配置
+ENABLE_ORDER_CHECK=true
+ORDER_PAYMENT_TIMEOUT_MINUTES=30
+ORDER_CHECK_INTERVAL_SECONDS=300
 ```
 
 | 变量 | 说明 |
@@ -97,11 +120,11 @@ MOCK_ORDER_STATE=NOTPAY
 | `GIT_REPO_URL` | C++ 代码仓库地址 |
 | `PAY_GIT_REPO_URL` | Go 支付服务代码仓库地址 |
 | `GIT_SSH_KEY_PATH` | SSH 私钥在**宿主机**上的绝对路径（私有仓库需要） |
-| `SERVER_NAME` | Nginx server_name（域名或 IP） |
-| `ENABLE_MYSQL` | `true` 启动内置 MySQL，`false` 使用外部数据库 |
-| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化，`false` 跳过 |
+| `ENABLE_MYSQL` | `true` 启动内置 MySQL（`profiles: mysql`），`false` 使用外部数据库 |
+| `ENABLE_INIT_DB` | `true` 执行 `init_db.sh` 初始化，`false` 跳过（使用 Flyway 时建议设为 `false`） |
 | `DB_HOST` | 数据库地址，使用内置 MySQL 时填 `db` |
 | `DB_USER` / `DB_PASS` / `DB_NAME` | 数据库账号、密码、库名 |
+| `SERVER_NAME` | Nginx server_name（域名或 IP） |
 | `PAY_MODE` | `mock`（模拟）或 `real`（真实微信支付） |
 | `MOCK_ORDER_STATE` | mock 查单返回状态（NOTPAY/SUCCESS/CLOSED/REVOKED） |
 | `OSS_ENDPOINT` | 阿里云 OSS Endpoint 地址 |
@@ -114,9 +137,9 @@ MOCK_ORDER_STATE=NOTPAY
 | `WECHAT_API_V3_KEY` | APIv3 密钥（`PAY_MODE=real` 时必填） |
 | `WECHAT_CERT_PATH` | 商户证书目录（容器内路径） |
 | `WECHAT_NOTIFY_URL` | 微信支付回调地址 |
-| `ENABLE_ORDER_CHECK` | 是否开启定时查单（`true`/`false`） |
-| `ORDER_PAYMENT_TIMEOUT_MINUTES` | 订单支付超时时间（分钟） |
-| `ORDER_CHECK_INTERVAL_SECONDS` | 查单间隔（秒） |
+| `ENABLE_ORDER_CHECK` | 是否开启定时查单兜底（`true`/`false`） |
+| `ORDER_PAYMENT_TIMEOUT_MINUTES` | 订单支付超时时间（分钟），超时后不再查询 |
+| `ORDER_CHECK_INTERVAL_SECONDS` | 定时查单间隔（秒） |
 
 ### 2. 构建并启动
 
@@ -129,16 +152,41 @@ docker compose up -d --build
 ```
 
 > 构建时 Docker 会从 Git 仓库 clone 代码并编译，需要 SSH 认证（私有仓库需配置 SSH key）。
+> C++ 镜像基于 Ubuntu 22.04，安装 build-essential、Boost、libmysqlclient-dev、libcurl、libssl 等依赖；Go 支付服务基于 golang:1.23 编译，最终运行镜像为 Alpine。
 
 ## 容器启动流程
 
 ```
-app (entrypoint: entrypoint.sh → server) ← 依赖 pay
-pay (Go 支付服务，静态编译，直接启动)
-nginx (等待 app 就绪后启动)
+app (entrypoint: entrypoint.sh)
+  └─ 若 ENABLE_INIT_DB=true 且 init_db.sh 存在 → 执行初始化脚本
+  └─ exec ./server 启动 C++ 服务（PID 1）
+  ← 依赖 pay
+
+pay (Go 支付服务，CGO_ENABLED=0 静态编译，直接启动)
+
+nginx (depends_on app，启动后反向代理到 app:8080 和 pay:9090)
+
+db (可选，profiles: mysql，MySQL 8.0，端口映射 3306)
 ```
 
-web 静态文件通过 Docker 命名卷 `web_data` 从 app 容器共享到 nginx，无需手动同步。
+web 静态文件通过 Docker 命名卷 `web_data` 从 app 容器 `/app/code/webSource` 共享到 nginx `/usr/share/nginx/web`，无需手动同步。
+
+## 数据库初始化
+
+项目通过 `migrations/1.sql` 管理数据库表结构，包含以下表：
+
+| 表名 | 说明 |
+|---|---|
+| `user` | 用户信息表 |
+| `session` | 用户会话表（关联 `user.id`） |
+| `account` | 第三方账号绑定表（关联 `user.id`） |
+| `verification` | 验证码 / 验证令牌表 |
+
+初始化方式：
+
+- **内置 MySQL**：通过 `init_db.sh` 脚本执行（需 `ENABLE_INIT_DB=true`）
+- **外部数据库**：手动执行 `migrations/1.sql` 或使用 Flyway 等迁移工具
+- **Flyway**：推荐生产环境使用，`migrations/` 目录下的 SQL 文件按版本顺序执行
 
 ## CI/CD 自动化部署
 
@@ -175,11 +223,12 @@ env:
 
 1. **Build & Push**：
    - 从 `.env` 读取 `GIT_REPO_URL` 和 `PAY_GIT_REPO_URL`
-   - SSH agent 授权 clone C++ 代码 → `make` 编译 → 推送到 ACR
-   - 克隆 Go 支付代码 → `go build`（静态编译）→ 推送到 ACR
+   - SSH agent 授权 clone C++ 代码 → `make` 编译（Ubuntu 22.04 镜像，依赖 Boost、libmysqlclient-dev 等）→ 推送到 ACR
+   - 克隆 Go 支付代码 → `CGO_ENABLED=0 go build` 静态编译 → 推送到 ACR
+   - 镜像 tag 使用日期格式 `YYYYMMDD`，同时推送 `latest`
    - 如果配置了第二套 ACR，同时推送到第二套
-2. **Deploy**：生成 `docker-compose.yml` 和 `nginx.conf` → SCP 到服务器 → SSH 执行 `docker compose pull && up -d`
-3. **`.env` 和 `nginx.conf` 管理**：首次部署自动上传到服务器，后续不覆盖
+2. **Deploy**：通过 `envsubst` 注入镜像地址生成 `docker-compose.yml`，注入域名生成 `nginx.conf` → SCP 到服务器 → SSH 执行 `docker compose down --volumes` 清理 → `docker compose pull` 拉新镜像 → `docker compose up -d` 启动
+3. **`.env` 和 `nginx.conf` 管理**：首次部署自动上传到服务器 `/opt/myapp/`，后续不覆盖
 
 ### 服务器端
 
@@ -207,12 +256,12 @@ docker compose up -d
 
 ## Nginx 路由
 
-| 路径 | 目标 |
-|---|---|
-| `/` | 静态文件 |
-| `/api` | C++ 后端 (`app:8080`) |
-| `/pay/notify` | Go 支付服务微信回调 (`my_go_pay:9090`) |
-| `/pay/mockOrderQuery/` | Go 支付服务查单接口 |
+| 路径 | 目标 | 说明 |
+|---|---|---|
+| `/` | 静态文件 (`/usr/share/nginx/web/html`) | index.html |
+| `/api` | C++ 后端 (`app:8080`) | 通过 upstream `crow_backend` 转发 |
+| `/pay/notify` | Go 支付服务微信回调 (`my_go_pay:9090`) | 通过 upstream `go_pay` 转发，`client_max_body_size 1m` |
+| `/pay/mockOrderQuery/` | Go 支付服务查单接口 (`my_go_pay:9090`) | Mock 查单，本地开发用 |
 
 ## 常见问题
 
