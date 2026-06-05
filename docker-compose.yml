@@ -52,6 +52,7 @@ services:
     networks:
       - my_net
     volumes:
+      - ./certs:/app/certs:ro 
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
 
