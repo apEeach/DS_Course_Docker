@@ -125,8 +125,8 @@ jobs:
         run: |
           mkdir -p deploy
           source .env
-          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ needs.build-and-push.outputs.image_tag }}"
-          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ needs.build-and-push.outputs.image_tag }}"
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:latest"
+          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:latest"
           export SERVER_NAME="${SERVER_NAME:-_}"
           envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
@@ -216,8 +216,8 @@ jobs:
         run: |
           mkdir -p deploy
           source .env
-          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ needs.build-and-push.outputs.image_tag }}"
-          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ needs.build-and-push.outputs.image_tag }}"
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:latest"
+          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:latest"
           export SERVER_NAME="${SERVER_NAME:-_}"
           envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
           envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
