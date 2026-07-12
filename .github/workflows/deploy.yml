@@ -3,6 +3,7 @@ name: Build and Deploy with Compose
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 env:
   ACR_NAMESPACE: sxd_server
