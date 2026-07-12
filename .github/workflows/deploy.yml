@@ -285,4 +285,4 @@ jobs:
   #           # 启动容器
   #           docker compose up -d app nginx pay
   #           # 清理旧镜像释放空间
-            docker image prune -af
+  #           docker image prune -af
