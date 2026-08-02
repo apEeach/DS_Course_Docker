@@ -129,8 +129,9 @@ jobs:
           export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:latest"
           export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:latest"
           export SERVER_NAME="${SERVER_NAME:-_}"
+          export SERVER_NAME_D2="${SERVER_NAME_D2:-_}"
           envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
-          envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
+          envsubst '${SERVER_NAME} ${SERVER_NAME_D2}' < nginx.conf > deploy/nginx.conf
 
       - name: Upload .env to temp dir
         uses: appleboy/scp-action@v0.1.7
@@ -190,9 +191,9 @@ jobs:
             # 停容器 + 删除命名卷
             docker compose down --volumes
             # 拉取最新镜像（跳过 profiles 服务）
-            docker compose pull app nginx pay
+            docker compose pull app nginx pay app_d2 pay_d2
             # 启动容器
-            docker compose up -d app nginx pay
+            docker compose up -d app nginx pay app_d2 pay_d2
             # 清理旧镜像释放空间
             docker image prune -af
 
@@ -281,8 +282,8 @@ jobs:
   #           # 停容器 + 删除命名卷
   #           docker compose down --volumes
   #           # 拉取最新镜像（跳过 profiles 服务）
-  #           docker compose pull app nginx pay
+  #           docker compose pull app nginx pay app_d2 pay_d2
   #           # 启动容器
-  #           docker compose up -d app nginx pay
+  #           docker compose up -d app nginx pay app_d2 pay_d2
   #           # 清理旧镜像释放空间
   #           docker image prune -af

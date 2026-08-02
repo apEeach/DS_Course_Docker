@@ -89,9 +89,64 @@ services:
       - /etc/localtime:/etc/localtime:ro  # 同步宿主机时区
       - /etc/timezone:/etc/timezone:ro    # 同步宿主机时区
 
+  # 5. 部门B (D2) - Go 支付服务
+  pay_d2:
+    image: ${PAY_IMAGE}
+    container_name: my_go_pay_d2
+    ports:
+      - "9091:9090"
+    environment:
+      - PAY_MODE=${PAY_MODE_D2:-mock}
+      - CPP_HOST=http://my_cpp_dev_d2:8080
+      - MOCK_ORDER_STATE=${MOCK_ORDER_STATE:-NOTPAY}
+      - WECHAT_APPID=${WECHAT_APPID_D2}
+      - WECHAT_MCH_ID=${WECHAT_MCH_ID_D2}
+      - WECHAT_SERIAL_NO=${WECHAT_SERIAL_NO_D2}
+      - WECHAT_API_V3_KEY=${WECHAT_API_V3_KEY_D2}
+      - WECHAT_PUB_KEY_ID=${WECHAT_PUB_KEY_ID_D2}
+      - WECHAT_CERT_PATH=${WECHAT_CERT_PATH_D2:-/app/certs}
+      - WECHAT_NOTIFY_URL=${WECHAT_NOTIFY_URL_D2}
+    networks:
+      - my_net
+    volumes:
+      - ./certs_d2:/app/certs:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
+  # 6. 部门B (D2) - C++ 应用
+  app_d2:
+    image: ${APP_IMAGE}
+    container_name: my_cpp_dev_d2
+    ports:
+      - "8081:8080"
+    environment:
+      - ENABLE_INIT_DB=${ENABLE_INIT_DB_D2:-true}
+      - DB_HOST=${DB_HOST_D2}
+      - DB_USER=${DB_USER_D2}
+      - DB_PASS=${DB_PASS_D2}
+      - DB_NAME=${DB_NAME_D2}
+      - OSS_ENDPOINT=${OSS_ENDPOINT_D2}
+      - OSS_ACCESS_KEY_ID=${OSS_ACCESS_KEY_ID_D2}
+      - OSS_ACCESS_KEY_SECRET=${OSS_ACCESS_KEY_SECRET_D2}
+      - OSS_BUCKET_NAME=${OSS_BUCKET_NAME_D2}
+      - PAY_HOST=http://my_go_pay_d2:9090
+      - ENABLE_ORDER_CHECK=${ENABLE_ORDER_CHECK_D2:-true}
+      - ORDER_PAYMENT_TIMEOUT_MINUTES=${ORDER_PAYMENT_TIMEOUT_MINUTES_D2:-30}
+      - ORDER_CHECK_INTERVAL_SECONDS=${ORDER_CHECK_INTERVAL_SECONDS_D2:-300}
+    depends_on:
+      - pay_d2
+    networks:
+      - my_net
+    privileged: true
+    volumes:
+      - web_data_d2:/app/code/webSource
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
 networks:
   my_net:
     driver: bridge
 
 volumes:
   web_data:
+  web_data_d2:
