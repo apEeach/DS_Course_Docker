@@ -7,6 +7,7 @@ on:
 
 env:
   ACR_NAMESPACE: sxd_server
+  ACR_NAMESPACE_2: dsy0809
   DEPLOY_TARGET: 1  # 1=只部署第一套, 2=只部署第二套, both=都部署
   SECONDARY_ACR_REGISTRY: ${{ secrets.ALIYUN_REGISTRY_2 }}
   SECONDARY_SSH_HOST: ${{ secrets.SSH_HOST_2 }}
@@ -31,6 +32,7 @@ jobs:
           ssh-private-key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
 
       - name: Login to Primary ACR
+        if: ${{ env.DEPLOY_TARGET != '2' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ALIYUN_REGISTRY }}
@@ -38,7 +40,7 @@ jobs:
           password: ${{ secrets.ALIYUN_PASSWORD }}
 
       - name: Login to Secondary ACR (if configured)
-        if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
+        if: ${{ env.DEPLOY_TARGET != '1' && env.SECONDARY_ACR_REGISTRY != '' }}
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.ALIYUN_REGISTRY_2 }}
@@ -52,6 +54,7 @@ jobs:
           echo "PAY_REPO_URL=${PAY_GIT_REPO_URL}" >> $GITHUB_ENV
 
       - name: Build and Push Pay Image
+        if: ${{ env.DEPLOY_TARGET != '2' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -66,7 +69,7 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ steps.set-tag.outputs.IMAGE_TAG }}
 
       - name: Build and Push Pay Image (Secondary)
-        if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
+        if: ${{ env.DEPLOY_TARGET != '1' && env.SECONDARY_ACR_REGISTRY != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -77,10 +80,11 @@ jobs:
           build-args: |
             PAY_GIT_REPO_URL=${{ env.PAY_REPO_URL }}
           tags: |
-            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:latest
-            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:${{ steps.set-tag.outputs.IMAGE_TAG }}
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_pay:latest
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_pay:${{ steps.set-tag.outputs.IMAGE_TAG }}
 
       - name: Build and Push
+        if: ${{ env.DEPLOY_TARGET != '2' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -95,7 +99,7 @@ jobs:
             ${{ secrets.ALIYUN_REGISTRY }}/${{ env.ACR_NAMESPACE }}/test_server:${{ steps.set-tag.outputs.IMAGE_TAG }}
 
       - name: Build and Push (Secondary)
-        if: ${{ env.SECONDARY_ACR_REGISTRY != '' }}
+        if: ${{ env.DEPLOY_TARGET != '1' && env.SECONDARY_ACR_REGISTRY != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -106,8 +110,8 @@ jobs:
           build-args: |
             GIT_REPO_URL=${{ env.REPO_URL }}
           tags: |
-            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:latest
-            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:${{ steps.set-tag.outputs.IMAGE_TAG }}
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_server:latest
+            ${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_server:${{ steps.set-tag.outputs.IMAGE_TAG }}
 
 
   deploy-to-server-1:
@@ -218,8 +222,8 @@ jobs:
   #       run: |
   #         mkdir -p deploy
   #         source .env
-  #         export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_server:latest"
-  #         export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE }}/test_pay:latest"
+  #         export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_server:latest"
+  #         export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_pay:latest"
   #         export SERVER_NAME="${SERVER_NAME:-_}"
   #         envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
   #         envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
