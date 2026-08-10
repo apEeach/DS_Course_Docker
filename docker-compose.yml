@@ -34,6 +34,7 @@ services:
       - app
     networks:
       - my_net
+      - dashboard_dual
 
   # 3. Go 支付服务
   pay:
@@ -146,6 +147,9 @@ services:
 networks:
   my_net:
     driver: bridge
+  dashboard_dual:
+    external: true
+    name: dashboard-dual
 
 volumes:
   web_data:
