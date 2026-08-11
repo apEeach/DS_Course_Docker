@@ -202,92 +202,92 @@ jobs:
             docker image prune -af
 
 
-  # deploy-to-server-2:
-  #   name: Deploy to Server 2
-  #   needs: build-and-push
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Check deploy target
-  #       if: ${{ env.DEPLOY_TARGET != '2' && env.DEPLOY_TARGET != 'both' }}
-  #       run: exit 1
+  deploy-to-server-2:
+    name: Deploy to Server 2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deploy target
+        if: ${{ env.DEPLOY_TARGET != '2' && env.DEPLOY_TARGET != 'both' }}
+        run: exit 1
 
-  #     - name: Check Server 2 credentials
-  #       if: ${{ env.SECONDARY_SSH_HOST == '' }}
-  #       run: exit 1
+      - name: Check Server 2 credentials
+        if: ${{ env.SECONDARY_SSH_HOST == '' }}
+        run: exit 1
 
-  #     - name: Checkout Code
-  #       uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-  #     - name: Prepare compose files
-  #       run: |
-  #         mkdir -p deploy
-  #         source .env
-  #         export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_server:latest"
-  #         export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_pay:latest"
-  #         export SERVER_NAME="${SERVER_NAME:-_}"
-  #         envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
-  #         envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
+      - name: Prepare compose files
+        run: |
+          mkdir -p deploy
+          source .env
+          export APP_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_server:latest"
+          export PAY_IMAGE="${{ secrets.ALIYUN_REGISTRY_2 }}/${{ env.ACR_NAMESPACE_2 }}/test_pay:latest"
+          export SERVER_NAME="${SERVER_NAME:-_}"
+          envsubst '${APP_IMAGE} ${PAY_IMAGE}' < docker-compose.yml > deploy/docker-compose.yml
+          envsubst '${SERVER_NAME}' < nginx.conf > deploy/nginx.conf
 
-  #     - name: Upload .env to temp dir
-  #       uses: appleboy/scp-action@v0.1.7
-  #       with:
-  #         host: ${{ secrets.SSH_HOST_2 }}
-  #         username: root
-  #         key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
-  #         source: ".env"
-  #         target: /opt/myapp_tmp
-  #         strip_components: 0
+      - name: Upload .env to temp dir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          source: ".env"
+          target: /opt/myapp_tmp
+          strip_components: 0
 
-  #     - name: Upload nginx.conf to temp dir
-  #       uses: appleboy/scp-action@v0.1.7
-  #       with:
-  #         host: ${{ secrets.SSH_HOST_2 }}
-  #         username: root
-  #         key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
-  #         source: "deploy/nginx.conf"
-  #         target: /opt/myapp_tmp
-  #         strip_components: 0
+      - name: Upload nginx.conf to temp dir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          source: "deploy/nginx.conf"
+          target: /opt/myapp_tmp
+          strip_components: 0
 
-  #     - name: Upload compose to server
-  #       uses: appleboy/scp-action@v0.1.7
-  #       with:
-  #         host: ${{ secrets.SSH_HOST_2 }}
-  #         username: root
-  #         key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
-  #         source: "deploy/docker-compose.yml"
-  #         target: /opt/myapp
-  #         strip_components: 1
+      - name: Upload compose to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          source: "deploy/docker-compose.yml"
+          target: /opt/myapp
+          strip_components: 1
 
-  #     - name: Deploy via SSH
-  #       uses: appleboy/ssh-action@v1.0.3
-  #       with:
-  #         host: ${{ secrets.SSH_HOST_2 }}
-  #         username: root
-  #         key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
-  #         script: |
-  #           cd /opt/myapp
-  #           # 首次部署才使用仓库的 .env，后续不覆盖服务器已有配置
-  #           if [ ! -f .env ] && [ -f /opt/myapp_tmp/.env ]; then
-  #             mv /opt/myapp_tmp/.env .env
-  #           else
-  #             rm -f /opt/myapp_tmp/.env
-  #           fi
-  #           # 首次部署才使用仓库的 nginx.conf，后续不覆盖服务器已有配置
-  #           if [ ! -f nginx.conf ] && [ -f /opt/myapp_tmp/nginx.conf ]; then
-  #             mv /opt/myapp_tmp/nginx.conf .
-  #           else
-  #             rm -f /opt/myapp_tmp/nginx.conf
-  #           fi
-  #           # 清理可能占用端口的旧 nginx 进程
-  #           nginx -s stop 2>/dev/null || true
-  #           systemctl stop nginx 2>/dev/null || true
-  #           # 登录阿里云镜像仓库
-  #           docker login --username=${{ secrets.ALIYUN_USERNAME_2 }} --password=${{ secrets.ALIYUN_PASSWORD_2 }} ${{ secrets.ALIYUN_REGISTRY_2 }}
-  #           # 停容器 + 删除命名卷
-  #           docker compose down --volumes
-  #           # 拉取最新镜像（跳过 profiles 服务）
-  #           docker compose pull app nginx pay app_d2 pay_d2
-  #           # 启动容器
-  #           docker compose up -d app nginx pay app_d2 pay_d2
-  #           # 清理旧镜像释放空间
-  #           docker image prune -af
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST_2 }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY_2 }}
+          script: |
+            cd /opt/myapp
+            # 首次部署才使用仓库的 .env，后续不覆盖服务器已有配置
+            if [ ! -f .env ] && [ -f /opt/myapp_tmp/.env ]; then
+              mv /opt/myapp_tmp/.env .env
+            else
+              rm -f /opt/myapp_tmp/.env
+            fi
+            # 首次部署才使用仓库的 nginx.conf，后续不覆盖服务器已有配置
+            if [ ! -f nginx.conf ] && [ -f /opt/myapp_tmp/nginx.conf ]; then
+              mv /opt/myapp_tmp/nginx.conf .
+            else
+              rm -f /opt/myapp_tmp/nginx.conf
+            fi
+            # 清理可能占用端口的旧 nginx 进程
+            nginx -s stop 2>/dev/null || true
+            systemctl stop nginx 2>/dev/null || true
+            # 登录阿里云镜像仓库
+            docker login --username=${{ secrets.ALIYUN_USERNAME_2 }} --password=${{ secrets.ALIYUN_PASSWORD_2 }} ${{ secrets.ALIYUN_REGISTRY_2 }}
+            # 停容器 + 删除命名卷
+            docker compose down --volumes
+            # 拉取最新镜像（跳过 profiles 服务）
+            docker compose pull app nginx pay app_d2 pay_d2
+            # 启动容器
+            docker compose up -d app nginx pay app_d2 pay_d2
+            # 清理旧镜像释放空间
+            docker image prune -af
