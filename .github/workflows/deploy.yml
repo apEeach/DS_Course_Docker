@@ -8,7 +8,7 @@ on:
 env:
   ACR_NAMESPACE: sxd_server
   ACR_NAMESPACE_2: dsy0809
-  DEPLOY_TARGET: 1  # 1=只部署第一套, 2=只部署第二套, both=都部署
+  DEPLOY_TARGET: 2  # 1=只部署第一套, 2=只部署第二套, both=都部署
   SECONDARY_ACR_REGISTRY: ${{ secrets.ALIYUN_REGISTRY_2 }}
   SECONDARY_SSH_HOST: ${{ secrets.SSH_HOST_2 }}
 
